@@ -20795,7 +20795,31 @@ function _parseAndAddSKUs(lines, _rows, listaKeyOverride) {
 
   const skipSet = new Set(['SKU','PRODUCTO','LISTA','CANT','SUBTOTAL','TOTAL','DESC','CLIENTE','CUIT']);
   const numRe   = /^[0-9]+$/;
-  const parsed  = [];
+  let parsed  = [];
+
+  // Reconoce primero el formato de nuestro propio "Descargar PDF con fotos" (no es una
+  // tabla: cada producto tiene su nombre, una línea "SKU: XXXXX" y otra "$X c/u × N"
+  // cerca). Es inconfundible con el formato de tabla (Código/Producto/Cant/...), así que
+  // si encuentra algo así, no hace falta ni intentar el parseo por columnas de abajo.
+  for (let i = 0; i < lines.length; i++) {
+    const linea = String(lines[i]).replace(/\t/g, ' ').trim();
+    const m = linea.match(/^SKU\s*:\s*(.+)$/i);
+    if (!m) continue;
+    const skuReal = skuIndex[m[1].trim().toUpperCase()];
+    if (!skuReal) continue;
+    let qty = 1;
+    for (let d = 0; d <= 3; d++) {
+      const cand = lines[i + d];
+      if (!cand) continue;
+      const qm = String(cand).replace(/\t/g, ' ').match(/[×x]\s*(\d+)\s*$/i);
+      if (qm) { qty = parseInt(qm[1], 10) || 1; break; }
+    }
+    const skuUp = m[1].trim().toUpperCase();
+    const existente = parsed.find(p => p.sku === skuUp);
+    if (existente) existente.qty = qty; else parsed.push({ sku: skuUp, qty });
+  }
+
+  if (!parsed.length) {
 
   // Reconstruir SKUs que el PDF cortó en dos líneas por una columna angosta
   // (ej: columna muestra "32781-AM" arriba y "A" abajo, en vez de "32781-AMA").
@@ -20829,6 +20853,8 @@ function _parseAndAddSKUs(lines, _rows, listaKeyOverride) {
     }
     if (!parsed.find(p => p.sku === candidate)) parsed.push({ sku: candidate, qty });
   });
+
+  } // cierre del "if (!parsed.length)" — solo se intenta el parseo por tabla si el formato propio no encontró nada
 
   if (!parsed.length) { showToast('\u26a0 No se encontraron SKUs coincidentes en la Lista de Precios', 'warn'); return; }
 
@@ -29940,9 +29966,13 @@ function openEnvioGCalModal(env) {
         _gcalAutoRangoPorTransporte();
       }
       const _transporteActual = (transpSel?.value || '').trim();
-      const _esEnviosDentalabPdf = !_transporteActual || /envíos?\s*dentalab/i.test(_transporteActual);
+      // Antes esto forzaba "Sucursal CABA" cuando el transporte detectado no era
+      // "Envíos Dentalab" (asumiendo que otros transportes son siempre retiro en
+      // sucursal) — pero OCA y el resto de los transportes externos también entregan
+      // a domicilio, así que directamente se usa la dirección real que trajo el PDF
+      // cuando la hay, sin adivinar nada según el transporte.
       const dirEl = document.getElementById('gcal-direccion');
-      if (dirEl && (datos.direccion || !_esEnviosDentalabPdf)) dirEl.value = _esEnviosDentalabPdf ? datos.direccion : 'Sucursal CABA';
+      if (dirEl && datos.direccion) dirEl.value = datos.direccion;
 
       if (datos.horario) {
         const rangoEl = document.getElementById('gcal-rango');
@@ -30691,9 +30721,12 @@ function openGCalModal(pedido) {
         if (typeof _gcalAutoRangoPorTransporte2 === 'function') _gcalAutoRangoPorTransporte2();
       }
       const _transporteActual = (transpSel?.value || '').trim();
-      const _esEnviosDentalabPdf = !_transporteActual || /envíos?\s*dentalab/i.test(_transporteActual);
+      // Antes esto forzaba "Sucursal CABA" cuando el transporte detectado no era
+      // "Envíos Dentalab" — pero OCA y el resto de los transportes externos también
+      // entregan a domicilio, así que se usa directamente la dirección real del PDF
+      // cuando la hay, sin adivinar nada según el transporte.
       const dirEl = backdrop.querySelector('#gcal-direccion');
-      if (dirEl && (datos.direccion || !_esEnviosDentalabPdf)) dirEl.value = _esEnviosDentalabPdf ? datos.direccion : 'Sucursal CABA';
+      if (dirEl && datos.direccion) dirEl.value = datos.direccion;
 
       if (datos.horario) {
         const rangoEl = backdrop.querySelector('#gcal-rango');
@@ -65412,6 +65445,28 @@ function _parsearDatosEnvioDesdePDFTexto(textLines) {
       if (m && m[1].trim()) resultado.localidad = m[1].trim();
     }
   });
+
+  // Respaldo: en algunos PDFs (típicamente los generados con el botón "Manual") el
+  // extractor separa la etiqueta "Lugar de Entrega:" de su valor real — el texto de la
+  // dirección puede aparecer varias líneas antes o después, pegado a otras etiquetas
+  // (Destinatario, Transporte) en vez de a la suya. Si la búsqueda directa de arriba no
+  // encontró nada, se revisan las líneas cercanas buscando algo con forma de dirección
+  // (tiene coma, tiene un número, y no es una etiqueta suelta de otro campo).
+  if (!resultado.direccion && idxLugar >= 0) {
+    const _pareceDireccion = (s) => {
+      const t = String(s || '').replace(/\t/g, ' ').trim();
+      if (!t || t.length < 6) return false;
+      if (/^\$?[\d.,]+$/.test(t)) return false; // es solo un monto suelto, no una dirección
+      if (/^(Forma|Tel[eé]fono|Transporte|Destinatario|Observaciones|Unidades|[ií]tems|Lugar\s+de\s+Entrega|Neto|Desc\s+gral|Percep\.?|Total|%\s*Dto)\s*:?\s*$/i.test(t)) return false;
+      return /\d/.test(t) && /,/.test(t);
+    };
+    for (let d = 1; d <= 15 && !resultado.direccion; d++) {
+      const despues = textLines[idxLugar + d];
+      const antes = textLines[idxLugar - d];
+      if (despues && _pareceDireccion(despues)) resultado.direccion = despues.replace(/\t/g, ' ').trim();
+      else if (antes && _pareceDireccion(antes)) resultado.direccion = antes.replace(/\t/g, ' ').trim();
+    }
+  }
 
   // Observaciones: todo lo que queda entre "Observaciones:" y "Lugar de Entrega:", recortando
   // lo que se cuela de la cajita de totales (Neto/IVA/etc.), que en el PDF cae en la misma zona.
