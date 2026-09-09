@@ -20811,7 +20811,7 @@ function _parseAndAddSKUs(lines, _rows, listaKeyOverride) {
     for (let d = 0; d <= 3; d++) {
       const cand = lines[i + d];
       if (!cand) continue;
-      const qm = String(cand).replace(/\t/g, ' ').match(/[×x]\s*(\d+)\s*$/i);
+      const qm = String(cand).replace(/\t/g, ' ').match(/[×x]\s*(\d+)\b/i);
       if (qm) { qty = parseInt(qm[1], 10) || 1; break; }
     }
     const skuUp = m[1].trim().toUpperCase();
