@@ -29966,13 +29966,15 @@ function openEnvioGCalModal(env) {
         _gcalAutoRangoPorTransporte();
       }
       const _transporteActual = (transpSel?.value || '').trim();
-      // Antes esto forzaba "Sucursal CABA" cuando el transporte detectado no era
-      // "Envíos Dentalab" (asumiendo que otros transportes son siempre retiro en
-      // sucursal) — pero OCA y el resto de los transportes externos también entregan
-      // a domicilio, así que directamente se usa la dirección real que trajo el PDF
-      // cuando la hay, sin adivinar nada según el transporte.
+      // La dirección depende del TIPO DE ENTREGA, no del transporte: si es "Retiro en
+      // sucursal" (recibido — se retira en una sucursal de Dentalab, no en el destino del
+      // cliente), va la sucursal CABA propia. Si es a domicilio (con Envíos Dentalab, OCA
+      // o cualquier otro transporte externo), va la dirección real que trajo el PDF.
       const dirEl = document.getElementById('gcal-direccion');
-      if (dirEl && datos.direccion) dirEl.value = datos.direccion;
+      if (dirEl) {
+        if (datos.tipoEntrega === 'sucursal') dirEl.value = 'Sucursal: CABA';
+        else if (datos.direccion) dirEl.value = datos.direccion;
+      }
 
       if (datos.horario) {
         const rangoEl = document.getElementById('gcal-rango');
@@ -30721,12 +30723,14 @@ function openGCalModal(pedido) {
         if (typeof _gcalAutoRangoPorTransporte2 === 'function') _gcalAutoRangoPorTransporte2();
       }
       const _transporteActual = (transpSel?.value || '').trim();
-      // Antes esto forzaba "Sucursal CABA" cuando el transporte detectado no era
-      // "Envíos Dentalab" — pero OCA y el resto de los transportes externos también
-      // entregan a domicilio, así que se usa directamente la dirección real del PDF
-      // cuando la hay, sin adivinar nada según el transporte.
+      // La dirección depende del TIPO DE ENTREGA, no del transporte: si es "Retiro en
+      // sucursal" va la sucursal CABA propia; si es a domicilio (con cualquier
+      // transporte), va la dirección real que trajo el PDF.
       const dirEl = backdrop.querySelector('#gcal-direccion');
-      if (dirEl && datos.direccion) dirEl.value = datos.direccion;
+      if (dirEl) {
+        if (datos.tipoEntrega === 'sucursal') dirEl.value = 'Sucursal: CABA';
+        else if (datos.direccion) dirEl.value = datos.direccion;
+      }
 
       if (datos.horario) {
         const rangoEl = backdrop.querySelector('#gcal-rango');
@@ -65792,7 +65796,7 @@ function _detectarCobroEnTexto(texto) {
   // por tener "link" en su lista) y antes del chequeo genérico de "pago".
   else if (/\bmercado\s*pago\b/i.test(textoLow) || /\btarjeta\s+de\s+(cr[eé]dito|d[eé]bito)\b/i.test(textoLow) || /\blink\b/i.test(textoLow)) cobro = 'en_espera';
   else if (/\b(pag[oó](?![a-záéíóúñ])|pagado|acreditado|abonado|abon[oó](?![a-záéíóúñ]))\b/i.test(textoLow) && !/\bno\s+(pag[oó]|pago|abon[oó]|abono)\b/i.test(textoLow) && !/\bpago\s+en\s+(destino|origen)\b/i.test(textoLow)) cobro = 'solo_entregar';
-  else if (/\busdt?\b/i.test(textoLow) || /us\$/i.test(textoLow) || /u\$s/i.test(textoLow) || /\bd[oó]lar(?:es)?\b/i.test(textoLow)) {
+  else if (/\busdt?\b/i.test(textoLow) || /us\$/i.test(textoLow) || /u\$s/i.test(textoLow) || /(?<!villa\s)\bd[oó]lar(?:es)?\b/i.test(textoLow)) {
     cobro = 'dolares';
     const amtMD = texto.match(/(?:usdt?|us\$|u\$s|d[oó]lares?)\s*\$?\s*([\d.,]+)/i) || texto.match(/([\d.,]+)\s*\$?\s*(?:usdt?|us\$|u\$s|d[oó]lares?)/i);
     if (amtMD) { const n = parseFloat(amtMD[1].replace(/\./g,'').replace(',','.')); if (!isNaN(n) && n > 0) montoDolares = String(Math.round(n)); }
